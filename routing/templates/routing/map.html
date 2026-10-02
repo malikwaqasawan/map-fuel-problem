@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fuel Route Map</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { height: 100%; margin: 0; font-family: -apple-system, Helvetica, Arial, sans-serif; }
+  #map { height: 100%; width: 100%; }
+  #summary {
+    position: absolute; top: 10px; left: 50px; z-index: 1000;
+    background: white; padding: 10px 14px; border-radius: 6px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.3); font-size: 14px; max-width: 320px;
+  }
+  #summary b { font-size: 16px; }
+  .precision-city { color: #b35900; }
+  .precision-address { color: #2d7d2d; }
+</style>
+</head>
+<body>
+<div id="summary"></div>
+<div id="map"></div>
+
+{{ payload|json_script:"route-data" }}
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const data = JSON.parse(document.getElementById('route-data').textContent);
+
+  const summaryEl = document.getElementById('summary');
+  const ledger = data.fuel_ledger || {};
+  const statusLine = data.status === 'OK'
+    ? `<b>$${(ledger.fuel_purchase_cost_usd ?? 0).toFixed(2)}</b> total fuel purchased`
+    : `<b style="color:#b00">${data.status}</b>`;
+  summaryEl.innerHTML = `
+    ${statusLine}<br>
+    ${data.total_distance_miles} mi &middot; ${data.fuel_stops.length} stop(s)<br>
+    <span style="color:#666">${data.message ? data.message : 'Straight-line corridor estimate, not a verified detour.'}</span>
+  `;
+
+  const map = L.map('map');
+  // Esri World Street Map: free, no API key, no watermark
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, '
+      + 'Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom',
+    maxZoom: 19,
+  }).addTo(map);
+
+  const geojsonLayer = L.geoJSON(data.map_data, {
+    style: feature => feature.properties.kind === 'route' ? { color: '#2a6fdb', weight: 4 } : {},
+    pointToLayer: (feature, latlng) => L.circleMarker(latlng, {
+      radius: 7, color: '#b35900', fillColor: '#ffb84d', fillOpacity: 0.9, weight: 2,
+    }),
+    onEachFeature: (feature, layer) => {
+      if (feature.properties.kind === 'fuel_stop') {
+        const p = feature.properties;
+        layer.bindPopup(
+          `<b>${p.name}</b><br>${p.city}, ${p.state}<br>` +
+          `$${p.price_per_gallon.toFixed(3)}/gal &middot; ${p.gallons_purchased} gal &middot; $${p.cost_usd.toFixed(2)}<br>` +
+          `<span class="precision-${p.coordinate_precision}">coordinate precision: ${p.coordinate_precision}</span>`
+        );
+      }
+    },
+  }).addTo(map);
+
+  if (geojsonLayer.getBounds().isValid()) {
+    map.fitBounds(geojsonLayer.getBounds(), { padding: [30, 30] });
+  } else {
+    map.setView([39.8, -98.6], 4);
+  }
+</script>
+</body>
+</html>
